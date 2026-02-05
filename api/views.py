@@ -5,6 +5,8 @@ from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
+import logging
+logger = logging.getLogger(__name__)
 
 from .models import (
     User,
@@ -27,17 +29,27 @@ from .serializers import (
 # ============================
 # AUTH / LOGIN
 # ============================
+from django.contrib.auth import authenticate
+from rest_framework_simplejwt.tokens import RefreshToken
+
 @api_view(["POST"])
 def login(request):
+    logger.warning("LOGIN ATTEMPT: %s", request.data)
     mobile = request.data.get("mobile")
     password = request.data.get("password")
 
-    user = authenticate(mobile=mobile, password=password)
+    if not mobile or not password:
+        return Response(
+            {"error": "Mobile and password required"},
+            status=400
+        )
 
-    if not user:
+    user = authenticate(request, mobile=mobile, password=password)
+
+    if user is None:
         return Response(
             {"error": "Invalid credentials"},
-            status=status.HTTP_401_UNAUTHORIZED
+            status=401
         )
 
     refresh = RefreshToken.for_user(user)
@@ -45,20 +57,65 @@ def login(request):
     return Response({
         "access": str(refresh.access_token),
         "refresh": str(refresh),
-        "user": UserSerializer(user).data
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "mobile": user.mobile,
+            "role": user.role,
+            "mandal_name": user.mandal_name,
+            "is_paid": user.is_paid,
+        }
+    })
+    
+    
+@api_view(["POST"])
+def signup(request):
+    logger.warning("SIGNUP DATA RAW: %s", request.body)
+    logger.warning("SIGNUP DATA PARSED: %s", request.data)
+    data = request.data
+    logger.warning("SIGNUP ATTEMPT: %s", request.data)
+    if User.objects.filter(mobile=data.get("mobile")).exists():
+        return Response(
+            {"error": "Mobile already registered"},
+            status=400
+        )
+
+    user = User.objects.create_user(
+        mobile=data["mobile"],
+        password=data["password"],
+        name=data["name"],
+        mandal_name=data["mandal_name"],
+        role=data.get("role", "Manager")
+    )
+
+    refresh = RefreshToken.for_user(user)
+
+    return Response({
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "mobile": user.mobile,
+            "role": user.role,
+            "mandal_name": user.mandal_name,
+        }
     })
 
+@api_view(["GET"])
+def ping(request):
+    print("🔥 PING HIT FROM PHONE")
+    return Response({"ok": True})
 
 # ============================
 # DONATIONS
 # ============================
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def create_donation(request):
-    data = request.data.copy()
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def create_donation(request):   
+    data = request.data.copy()
+    logger.warning("DONATION HIT: %s", request.data)
     data["created_by_user_id"] = request.user.id
     data["created_by_name"] = request.user.name
     data["mandal_name"] = request.user.mandal_name
@@ -200,6 +257,8 @@ def get_notifications(request):
 
 @api_view(["POST"])
 def register(request):
+    logger.warning("SIGNUP DATA RAW: %s", request.body)
+    logger.warning("SIGNUP DATA PARSED: %s", request.data)
     serializer = RegisterSerializer(data=request.data)
 
     if serializer.is_valid():

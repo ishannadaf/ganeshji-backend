@@ -23,7 +23,7 @@ urlpatterns = [
     path("notifications/", views.get_notifications),
     
     # 🧑‍🤝‍🧑 USERS / SIGNUP
-    path("register/", views.register),
+    # path("register/", views.register),
     
     path("user/update-profile/", views.update_profile),
     
@@ -33,4 +33,6 @@ urlpatterns = [
     path("wallet/reject/", views.reject_wallet_request),
     
     path("user/add/", views.add_user),
+    path("ping/", views.ping),
+    path("signup/", views.signup),
 ]

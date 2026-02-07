@@ -6,6 +6,11 @@ from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 import logging
+from django.db.models import Sum
+
+from django.db import transaction
+
+
 logger = logging.getLogger(__name__)
 
 from .models import (
@@ -34,50 +39,123 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 @api_view(["POST"])
 def login(request):
-    logger.warning("LOGIN ATTEMPT: %s", request.data)
     mobile = request.data.get("mobile")
     password = request.data.get("password")
 
     if not mobile or not password:
         return Response(
-            {"error": "Mobile and password required"},
-            status=400
+            {"error": "Mobile and password are required"},
+            status=status.HTTP_400_BAD_REQUEST
         )
 
-    user = authenticate(request, mobile=mobile, password=password)
+    # 🔐 Authenticate using USERNAME_FIELD
+    user = authenticate(request, username=mobile, password=password)
 
     if user is None:
         return Response(
-            {"error": "Invalid credentials"},
-            status=401
+            {"error": "Invalid mobile or password"},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    if not user.is_active:
+        return Response(
+            {"error": "User account is disabled"},
+            status=status.HTTP_403_FORBIDDEN
         )
 
     refresh = RefreshToken.for_user(user)
 
+    return Response(
+        {
+            "access": str(refresh.access_token),
+            "refresh": str(refresh),
+            "user": {
+                "id": user.id,
+                "name": user.name,
+                "mobile": user.mobile,
+                "role": user.role,
+                "mandal_name": user.mandal_name,
+                "is_paid": user.is_paid,
+            },
+        },
+        status=status.HTTP_200_OK
+    )
+
+def calculate_user_wallet(user_id):
+    donations = Donation.objects.filter(
+        created_by_user_id=user_id,
+        is_deleted=False
+    ).aggregate(total=Sum("amount"))["total"] or 0
+
+    expenses = Expense.objects.filter(
+        created_by_user_id=user_id,
+        is_deleted=False
+    ).aggregate(total=Sum("amount"))["total"] or 0
+
+    sent = WalletTransfer.objects.filter(
+        from_user_id=user_id,
+        status="Approved"
+    ).aggregate(total=Sum("amount"))["total"] or 0
+
+    return donations - expenses - sent
+
+def calculate_manager_wallet(manager_id):
+    base_wallet = calculate_user_wallet(manager_id)
+
+    received = WalletTransfer.objects.filter(
+        to_manager_id=manager_id,
+        status="Approved"
+    ).aggregate(total=Sum("amount"))["total"] or 0
+
+    return base_wallet + received
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def sync_wallet(request):
+    user = request.user
+
+    if user.role == "Manager":
+        wallet = calculate_manager_wallet(user.id)
+    else:
+        wallet = calculate_user_wallet(user.id)
+
     return Response({
-        "access": str(refresh.access_token),
-        "refresh": str(refresh),
-        "user": {
-            "id": user.id,
-            "name": user.name,
-            "mobile": user.mobile,
-            "role": user.role,
-            "mandal_name": user.mandal_name,
-            "is_paid": user.is_paid,
-        }
+        "wallet_balance": wallet
     })
-    
-    
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def dashboard_summary(request):
+    mandal = request.user.mandal_name
+
+    total_collection = Donation.objects.filter(
+        mandal_name=mandal,
+        is_deleted=False
+    ).aggregate(total=Sum("amount"))["total"] or 0
+
+    total_expense = Expense.objects.filter(
+        mandal_name=mandal,
+        is_deleted=False
+    ).aggregate(total=Sum("amount"))["total"] or 0
+
+    return Response({
+        "total_collection": total_collection,
+        "total_expense": total_expense,
+        "net_balance": total_collection - total_expense
+    })
+
+
 @api_view(["POST"])
 def signup(request):
-    logger.warning("SIGNUP DATA RAW: %s", request.body)
-    logger.warning("SIGNUP DATA PARSED: %s", request.data)
+    logger.warning("SIGNUP HIT: %s", request.data)
     data = request.data
-    logger.warning("SIGNUP ATTEMPT: %s", request.data)
+
     if User.objects.filter(mobile=data.get("mobile")).exists():
         return Response(
             {"error": "Mobile already registered"},
-            status=400
+            status=status.HTTP_400_BAD_REQUEST
         )
 
     user = User.objects.create_user(
@@ -85,7 +163,7 @@ def signup(request):
         password=data["password"],
         name=data["name"],
         mandal_name=data["mandal_name"],
-        role=data.get("role", "Manager")
+        role=data.get("role") or "Manager"
     )
 
     refresh = RefreshToken.for_user(user)
@@ -100,7 +178,8 @@ def signup(request):
             "role": user.role,
             "mandal_name": user.mandal_name,
         }
-    })
+    }, status=status.HTTP_201_CREATED)
+
 
 @api_view(["GET"])
 def ping(request):
@@ -113,22 +192,22 @@ def ping(request):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def create_donation(request):   
-    data = request.data.copy()
+def create_donation(request):
     logger.warning("DONATION HIT: %s", request.data)
-    data["created_by_user_id"] = request.user.id
-    data["created_by_name"] = request.user.name
-    data["mandal_name"] = request.user.mandal_name
 
-    donation, created = Donation.objects.get_or_create(
-        client_donation_id=data.get("client_donation_id"),
-        defaults=data
-    )
+    serializer = DonationSerializer(data=request.data)
 
-    return Response(
-        DonationSerializer(donation).data,
-        status=201 if created else 200
-    )
+    if serializer.is_valid():
+        serializer.save(
+                created_by_user_id=request.user.id,
+                created_by_name=request.user.name,
+                mandal_name=request.user.mandal_name
+            )
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    logger.error("DONATION ERROR: %s", serializer.errors)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(["GET"])
@@ -158,22 +237,20 @@ def get_donations(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_expense(request):
-    data = request.data.copy()
+    logger.warning("EXPENSE HIT: %s", request.data)
 
-    data["created_by_user_id"] = request.user.id
-    data["created_by_name"] = request.user.name
-    data["mandal_name"] = request.user.mandal_name
+    serializer = ExpenseSerializer(data=request.data)
 
-    expense, created = Expense.objects.get_or_create(
-        client_expense_id=data.get("client_expense_id"),
-        defaults=data
-    )
+    if serializer.is_valid():
+        serializer.save(
+            created_by_user_id=request.user.id,
+            created_by_name=request.user.name,
+            mandal_name=request.user.mandal_name
+        )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    return Response(
-        ExpenseSerializer(expense).data,
-        status=201 if created else 200
-    )
-
+    logger.error("EXPENSE ERROR: %s", serializer.errors)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
@@ -215,15 +292,32 @@ def get_expenses(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_wallet_request(request):
-    data = request.data.copy()
-    data["from_user_id"] = request.user.id
-    data["mandal_name"] = request.user.mandal_name
+    user = request.user
 
-    serializer = WalletTransferSerializer(data=data)
-    if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data)
-    return Response(serializer.errors, status=400)
+    amount = request.data.get("amount")
+    client_id = request.data.get("client_wallet_transfer_id")
+
+    if not amount or not client_id:
+        return Response(
+            {"error": "Amount and client id required"},
+            status=400
+        )
+
+    WalletTransfer.objects.create(
+        client_wallet_transfer_id=client_id,
+        from_user_id=user.id,
+        mandal_name=user.mandal_name,
+        amount=amount,
+        status="Pending",
+        requested_at=timezone.now()
+    )
+
+    return Response(
+        {"message": "Wallet request created"},
+        status=201
+    )
+
+
 
 
 @api_view(["GET"])
@@ -238,9 +332,14 @@ def get_wallet_requests(request):
         )
 
     qs = WalletTransfer.objects.filter(
-        mandal_name=user.mandal_name
+        mandal_name=user.mandal_name,
+        status="Pending"
+    ).order_by("requested_at")
+
+    return Response(
+        WalletTransferSerializer(qs, many=True).data
     )
-    return Response(WalletTransferSerializer(qs, many=True).data)
+
 
 
 # ============================
@@ -257,8 +356,7 @@ def get_notifications(request):
 
 @api_view(["POST"])
 def register(request):
-    logger.warning("SIGNUP DATA RAW: %s", request.body)
-    logger.warning("SIGNUP DATA PARSED: %s", request.data)
+    logger.warning("REGISTER HIT: %s", request.data)
     serializer = RegisterSerializer(data=request.data)
 
     if serializer.is_valid():
@@ -301,102 +399,124 @@ def update_profile(request):
 @permission_classes([IsAuthenticated])
 def change_password(request):
     user = request.user
+    data = request.data
 
-    target_user_id = request.data.get("user_id")
-    old_password = request.data.get("old_password")
-    new_password = request.data.get("new_password")
+    target_user_id = data.get("user_id")
+    old_password = data.get("old_password")
+    new_password = data.get("new_password")
 
-    # Determine target user
-    if target_user_id:
-        if user.role != "Manager":
+    if not target_user_id or not new_password:
+        return Response(
+            {"error": "Invalid request"},
+            status=400
+        )
+
+    try:
+        target_user = User.objects.get(id=target_user_id)
+    except User.DoesNotExist:
+        return Response(
+            {"error": "User not found"},
+            status=404
+        )
+
+    # 🔐 Self password change → verify old password
+    if user.id == target_user.id:
+        if not old_password or not target_user.check_password(old_password):
             return Response(
-                {"error": "Permission denied"},
+                {"error": "Current password incorrect"},
                 status=403
             )
-        try:
-            target_user = User.objects.get(id=target_user_id)
-        except User.DoesNotExist:
-            return Response(
-                {"error": "User not found"},
-                status=404
-            )
-    else:
-        target_user = user
 
-        if not old_password:
-            return Response(
-                {"error": "Old password required"},
-                status=400
-            )
+    # 🔒 Manager can change sub-user password without old password
+    elif user.role != "Manager":
+        return Response(
+            {"error": "Permission denied"},
+            status=403
+        )
 
-        if not target_user.check_password(old_password):
-            return Response(
-                {"error": "Old password incorrect"},
-                status=400
-            )
-
-    # Set new password (hashed)
     target_user.set_password(new_password)
     target_user.save()
 
-    return Response({"message": "Password updated"})
-
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def create_wallet_request(request):
-    data = request.data.copy()
-
-    transfer, created = WalletTransfer.objects.get_or_create(
-        client_wallet_transfer_id=data.get("client_wallet_transfer_id"),
-        defaults=data
-    )
-
     return Response(
-        WalletTransferSerializer(transfer).data,
-        status=201 if created else 200
+        {"message": "Password changed successfully"},
+        status=200
     )
-    
+
     
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def approve_wallet_request(request):
+    manager = request.user
+
+    if manager.role != "Manager":
+        return Response({"error": "Only manager can approve"}, status=403)
+
     transfer_id = request.data.get("client_wallet_transfer_id")
 
     try:
         transfer = WalletTransfer.objects.get(
-            client_wallet_transfer_id=transfer_id
+            client_wallet_transfer_id=transfer_id,
+            status="Pending"
         )
-
-        transfer.status = "Approved"
-        transfer.approved_at = timezone.now()
-        transfer.save()
-
-        return Response({"message": "Approved"})
     except WalletTransfer.DoesNotExist:
-        return Response(status=404)
+        return Response({"error": "Transfer not found"}, status=404)
+
+    user = User.objects.get(id=transfer.from_user_id)
+
+    # 🔴 CRITICAL WALLET LOGIC
+    user.wallet_balance -= transfer.amount
+    manager.wallet_balance += transfer.amount
+
+    user.total_transferred += transfer.amount
+
+    user.save()
+    manager.save()
+
+    transfer.status = "Approved"
+    transfer.approved_at = timezone.now()
+    transfer.save()
+
+    return Response({"message": "Approved"})
+
+
     
     
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def reject_wallet_request(request):
+    manager = request.user
+
+    if manager.role != "Manager":
+        return Response({"error": "Only manager can reject"}, status=403)
+
     transfer_id = request.data.get("client_wallet_transfer_id")
 
     try:
         transfer = WalletTransfer.objects.get(
-            client_wallet_transfer_id=transfer_id
+            client_wallet_transfer_id=transfer_id,
+            status="Pending"
         )
-
-        transfer.status = "Rejected"
-        transfer.approved_at = timezone.now()
-        transfer.save()
-
-        return Response({"message": "Rejected"})
     except WalletTransfer.DoesNotExist:
-        return Response(status=404)
-    
-    
-from django.contrib.auth.hashers import make_password
+        return Response({"error": "Transfer not found"}, status=404)
+
+    transfer.status = "Rejected"
+    transfer.approved_at = timezone.now()
+    transfer.save()
+
+    return Response({"message": "Rejected"})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def list_users(request):
+    users = User.objects.filter(
+        mandal_name=request.user.mandal_name
+    )
+
+    return Response(
+        UserSerializer(users, many=True).data
+    )
+
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -405,27 +525,166 @@ def add_user(request):
 
     if manager.role != "Manager":
         return Response(
-            {"error": "Permission denied"},
+            {"error": "Only managers can add users"},
             status=403
         )
 
-    mobile = request.data.get("mobile")
+    data = request.data
 
-    if User.objects.filter(mobile=mobile).exists():
+    required = ["name", "mobile", "password", "mandal_name"]
+    for field in required:
+        if not data.get(field):
+            return Response(
+                {"error": f"{field} is required"},
+                status=400
+            )
+
+    if User.objects.filter(
+        mobile=data["mobile"],
+        mandal_name=manager.mandal_name
+    ).exists():
         return Response(
             {"error": "User already exists"},
             status=409
         )
 
-    user = User.objects.create(
-        name=request.data.get("name"),
-        mobile=mobile,
-        mandal_name=manager.mandal_name,
+    user = User.objects.create_user(
+        mobile=data["mobile"],
+        password=data["password"],
+        name=data["name"],
         role="User",
-        password=make_password(request.data.get("password"))
+        mandal_name=manager.mandal_name
     )
 
     return Response(
-        UserSerializer(user).data,
+        {
+            "message": "User added successfully",
+            "user": {
+                "id": user.id,
+                "name": user.name,
+                "mobile": user.mobile,
+                "role": user.role
+            }
+        },
         status=201
+    )
+
+    
+# api/views.py
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def sync_user(request):
+    user = request.user
+
+    if not user or not user.is_active:
+        return Response(
+            {"error": "User not active"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    return Response(
+        {
+            "id": user.id,
+            "name": user.name,
+            "mobile": user.mobile,
+            "role": user.role,
+            "mandal_name": user.mandal_name,
+
+            # 🔐 Subscription
+            "is_paid": user.is_paid,
+            "is_demo_user": user.is_demo_user,
+
+            # 💰 Wallet
+            "wallet_balance": user.wallet_balance,
+            "total_collected": user.total_collected,
+            "total_transferred": user.total_transferred,
+            "manager_balance": user.manager_balance,
+
+            # 📊 Counters
+            "donation_count": user.donation_count,
+            "expense_count": user.expense_count,
+            "entry_count": user.entry_count,
+        },
+        status=status.HTTP_200_OK
+    )
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def sync_donations(request):
+    user = request.user
+
+    if not user or not user.is_active:
+        return Response(
+            {"error": "User not active"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    donations = Donation.objects.filter(
+        mandal_name=user.mandal_name,
+        is_deleted=False
+    ).order_by("-date")
+
+    serializer = DonationSerializer(donations, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def sync_expenses(request):
+    user = request.user
+
+    if not user or not user.is_active:
+        return Response(
+            {"error": "User not active"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    expenses = Expense.objects.filter(
+        mandal_name=user.mandal_name,
+        is_deleted=False
+    ).order_by("-date")
+
+    serializer = ExpenseSerializer(expenses, many=True)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def update_user(request):
+    manager = request.user
+
+    if manager.role != "Manager":
+        return Response(
+            {"error": "Only managers can update users"},
+            status=403
+        )
+
+    data = request.data
+    user_id = data.get("user_id")
+
+    if not user_id:
+        return Response(
+            {"error": "user_id is required"},
+            status=400
+        )
+
+    try:
+        user = User.objects.get(id=user_id, mandal_name=manager.mandal_name)
+    except User.DoesNotExist:
+        return Response(
+            {"error": "User not found"},
+            status=404
+        )
+
+    if data.get("name"):
+        user.name = data["name"]
+
+    if data.get("password"):
+        user.set_password(data["password"])
+
+    user.save()
+
+    return Response(
+        {"message": "User updated successfully"},
+        status=200
     )

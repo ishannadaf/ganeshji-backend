@@ -1,1 +1,1 @@
-web: python manage.py migrate && gunicorn ganeshji.wsgi
+web: python manage.py migrate && gunicorn ganeshji.wsgi --log-file -

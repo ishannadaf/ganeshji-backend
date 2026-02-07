@@ -6,4 +6,3 @@ whitenoise
 psycopg2-binary
 python-dotenv
 mysqlclient
-python-3.10.13

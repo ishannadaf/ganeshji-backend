@@ -11,10 +11,12 @@ urlpatterns = [
     # 💰 DONATIONS
     path("donations/create/", views.create_donation),
     path("donations/", views.get_donations),
+    path("donations/delete/<str:client_id>/", views.delete_donation),
 
     # 💸 EXPENSES
     path("expenses/create/", views.create_expense),
     path("expenses/", views.get_expenses),
+    path("expenses/delete/<str:client_id>/", views.delete_expense),
 
     # 💼 WALLET
     path("wallet/create/", views.create_wallet_request),
@@ -41,4 +43,9 @@ urlpatterns = [
     path("sync/user/", views.sync_user, name="sync_user"),
     path("sync/donations/", views.sync_donations, name="sync_donations"),
     path("sync/expenses/", views.sync_expenses, name="sync_expenses"),
+    
+    
+    path("collections/summary/", views.collection_summary),
+    path("collections/user/<int:user_id>/", views.donations_by_user),
+
 ]

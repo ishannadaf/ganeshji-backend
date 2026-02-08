@@ -231,6 +231,50 @@ def get_donations(request):
     return Response(DonationSerializer(qs, many=True).data)
 
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def collection_summary(request):
+    user = request.user
+
+    if user.role != "Manager":
+        return Response(
+            {"detail": "Access denied"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    mandal = user.mandal_name
+
+    donations = (
+        Donation.objects
+        .filter(mandal_name=mandal, is_deleted=False)
+        .values("created_by_user_id", "created_by_name")
+        .annotate(total=Sum("amount"))
+        .order_by("created_by_name")
+    )
+
+    return Response(donations)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def donations_by_user(request, user_id):
+    user = request.user
+
+    if user.role != "Manager":
+        return Response(
+            {"detail": "Access denied"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    qs = Donation.objects.filter(
+        created_by_user_id=user_id,
+        mandal_name=user.mandal_name,
+        is_deleted=False
+    ).order_by("-date")
+
+    return Response(DonationSerializer(qs, many=True).data)
+
+
 # ============================
 # EXPENSES
 # ============================
@@ -254,17 +298,69 @@ def create_expense(request):
 
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
-def delete_donation(request, client_donation_id):
+def delete_donation(request, client_id):
+    user = request.user
+
     try:
         donation = Donation.objects.get(
-            client_donation_id=client_donation_id
+            client_donation_id=client_id,
+            is_deleted=False
         )
-        donation.is_deleted = True
-        donation.save()
-
-        return Response(status=204)
     except Donation.DoesNotExist:
-        return Response(status=404)
+        return Response(
+            {"error": "Donation not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # 🔒 PERMISSION CHECK
+    if user.role != "Manager" and donation.created_by_user_id != user.id:
+        return Response(
+            {"error": "Permission denied"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # ❌ SOFT DELETE
+    donation.is_deleted = True
+    donation.save(update_fields=["is_deleted"])
+
+    return Response(
+        {"message": "Donation deleted successfully"},
+        status=status.HTTP_200_OK
+    )
+
+
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def delete_expense(request, client_id):
+    user = request.user
+
+    try:
+        expense = Expense.objects.get(
+            client_expense_id=client_id,
+            is_deleted=False
+        )
+    except Expense.DoesNotExist:
+        return Response(
+            {"error": "Expense not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # 🔒 PERMISSION CHECK
+    if user.role != "Manager" and expense.created_by_user_id != user.id:
+        return Response(
+            {"error": "Permission denied"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+
+    # ❌ SOFT DELETE
+    expense.is_deleted = True
+    expense.save(update_fields=["is_deleted"])
+
+    return Response(
+        {"message": "Expense deleted successfully"},
+        status=status.HTTP_200_OK
+    )
+
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])

@@ -8,11 +8,11 @@ class DonationAdmin(admin.ModelAdmin):
         "donor_name",
         "amount",
         "donation_type",
-        "mandal_name",
+        "mandal",
         "date",
     )
-    search_fields = ("donor_name", "mandal_name")
-    list_filter = ("donation_type", "mandal_name")
+    search_fields = ("donor_name", "mandal")
+    list_filter = ("donation_type", "mandal")
 
 
 @admin.register(Expense)
@@ -22,11 +22,11 @@ class ExpenseAdmin(admin.ModelAdmin):
         "category",
         "amount",
         "payment_mode",
-        "mandal_name",
+        "mandal",
         "date",
     )
-    search_fields = ("category", "paid_to", "mandal_name")
-    list_filter = ("payment_mode", "mandal_name", "category")
+    search_fields = ("category", "paid_to", "mandal")
+    list_filter = ("payment_mode", "mandal", "category")
     
     
 
@@ -37,12 +37,12 @@ class UserAdmin(admin.ModelAdmin):
         "name",
         "mobile",
         "role",
-        "mandal_name",
+        "mandal",
         "is_paid",
         "wallet_balance",
     )
-    search_fields = ("name", "mobile", "mandal_name")
-    list_filter = ("role", "is_paid", "mandal_name")
+    search_fields = ("name", "mobile", "mandal")
+    list_filter = ("role", "is_paid", "mandal")
 
 
 
@@ -52,13 +52,13 @@ class WalletTransferAdmin(admin.ModelAdmin):
         "id",
         "amount",
         "status",
-        "mandal_name",
+        "mandal",
         "from_user_id",
         "to_manager_id",
         "requested_at",
     )
-    list_filter = ("status", "mandal_name")
-    search_fields = ("mandal_name",)
+    list_filter = ("status", "mandal")
+    search_fields = ("mandal",)
     
     
 @admin.register(AppNotification)

@@ -47,5 +47,15 @@ urlpatterns = [
     
     path("collections/summary/", views.collection_summary),
     path("collections/user/<int:user_id>/", views.donations_by_user),
+    
+    
+    path('events/', views.get_all_events),
+    path('create-event/', views.create_mandal_event),
+    path('my-events/', views.get_my_events),
+
+    path('create-subscription-order/', views.create_subscription_order),
+    path('verify-subscription/', views.verify_and_activate_subscription),
+    path('subscription-status/<int:mandal_id>/', views.get_subscription_status),
+    path('validate-session/', views.validate_session),
 
 ]

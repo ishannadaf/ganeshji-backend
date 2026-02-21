@@ -2,6 +2,16 @@ from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.utils import timezone
 
+class Mandal(models.Model):
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=100, unique=True)
+
+    class Meta:
+        db_table = "ganesh_mandals"
+
+    def __str__(self):
+        return self.name
+
 
 # ============================
 # CUSTOM USER MANAGER
@@ -29,7 +39,11 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     id = models.AutoField(primary_key=True)
 
-    mandal_name = models.CharField(max_length=100)
+    mandal = models.ForeignKey(
+            Mandal,
+            on_delete=models.CASCADE,
+            related_name="users"
+        )
 
     name = models.CharField(max_length=100)
     mobile = models.CharField(max_length=15, unique=True)
@@ -77,7 +91,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         db_table = "ganesh_users"
         indexes = [
             models.Index(fields=["mobile"]),
-            models.Index(fields=["mandal_name"]),
+            models.Index(fields=["mandal"]),
             models.Index(fields=["role"]),
         ]
 
@@ -89,6 +103,12 @@ class User(AbstractBaseUser, PermissionsMixin):
 # DONATIONS
 # ============================
 class Donation(models.Model):
+    mandal_event = models.ForeignKey(
+        "MandalEvent",
+        on_delete=models.CASCADE,
+        related_name="donations"
+    )
+
     donor_name = models.CharField(max_length=200)
     amount = models.FloatField()
 
@@ -101,26 +121,35 @@ class Donation(models.Model):
 
     created_by_user_id = models.IntegerField()
     created_by_name = models.CharField(max_length=100)
-    mandal_name = models.CharField(max_length=100)
-    
+    mandal = models.ForeignKey(
+            Mandal,
+            on_delete=models.CASCADE,
+            related_name="donation"
+        )
+
     client_donation_id = models.CharField(
-    max_length=50,
-    unique=True
-)
+        max_length=50,
+        unique=True
+    )
+
     is_synced = models.BooleanField(default=True)
     is_deleted = models.BooleanField(default=False)
+
     class Meta:
         db_table = "donations"
         ordering = ["-date"]
-
-    def __str__(self):
-        return f"{self.donor_name} - ₹{self.amount}"
-
-
+        
+        
 # ============================
 # EXPENSES
 # ============================
 class Expense(models.Model):
+    mandal_event = models.ForeignKey(
+        "MandalEvent",
+        on_delete=models.CASCADE,
+        related_name="expenses"
+    )
+
     category = models.CharField(max_length=100)
     amount = models.FloatField()
 
@@ -129,24 +158,41 @@ class Expense(models.Model):
 
     created_by_user_id = models.IntegerField()
     created_by_name = models.CharField(max_length=100)
-    mandal_name = models.CharField(max_length=100)
+    mandal = models.ForeignKey(
+            Mandal,
+            on_delete=models.CASCADE,
+            related_name="expense"
+        )
 
     date = models.DateTimeField()
-    
+
     client_expense_id = models.CharField(
-    max_length=50,
-    unique=True
-)
+        max_length=50,
+        unique=True
+    )
+    # event_id = models.IntegerField()
     is_synced = models.BooleanField(default=True)
     is_deleted = models.BooleanField(default=False)
+
     class Meta:
         db_table = "expenses"
         ordering = ["-date"]
 
+class EventMaster(models.Model):
+    event_name = models.CharField(max_length=100, unique=True)
+
     def __str__(self):
-        return f"{self.category} - ₹{self.amount}"
+        return self.event_name
 
+class MandalEvent(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    event = models.ForeignKey(EventMaster, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        unique_together = ('user', 'event')  # 🚨 Prevent duplicate event creation
+        
+    
 # ============================
 # WALLET TRANSFER
 # ============================
@@ -154,7 +200,11 @@ class WalletTransfer(models.Model):
     from_user_id = models.IntegerField()
     to_manager_id = models.IntegerField()
 
-    mandal_name = models.CharField(max_length=100)
+    mandal = models.ForeignKey(
+            Mandal,
+            on_delete=models.CASCADE,
+            related_name="wallet_transfer"
+        )
     amount = models.FloatField()
 
     status = models.CharField(
@@ -169,7 +219,12 @@ class WalletTransfer(models.Model):
 
     requested_at = models.DateTimeField()
     approved_at = models.DateTimeField(null=True, blank=True)
-
+    mandal_event = models.ForeignKey(
+        MandalEvent,
+        on_delete=models.CASCADE,
+        related_name="wallet_transfers",
+        null=True
+    )
     class Meta:
         db_table = "wallet_transfers"
         ordering = ["-requested_at"]
@@ -198,3 +253,41 @@ class AppNotification(models.Model):
 
     def __str__(self):
         return self.title
+    
+    
+
+    
+    
+class SubscriptionPlan(models.Model):
+    PLAN_TYPES = [
+        ("GOLD", "Gold"),
+        ("SILVER", "Silver"),
+        ("PLATINUM", "Platinum"),
+    ]
+
+    name = models.CharField(max_length=20, choices=PLAN_TYPES)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    duration_days = models.IntegerField(default=365)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.name} - ₹{self.price}"
+
+
+class MandalSubscription(models.Model):
+
+    mandal = models.ForeignKey("Mandal", on_delete=models.CASCADE)
+    plan = models.ForeignKey(SubscriptionPlan, on_delete=models.PROTECT)
+
+    start_date = models.DateTimeField()
+    end_date = models.DateTimeField()
+
+    payment_transaction_id = models.CharField(max_length=200)
+    user_upi_id = models.CharField(max_length=200, null=True, blank=True)
+
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.mandal.name} - {self.plan.name}"

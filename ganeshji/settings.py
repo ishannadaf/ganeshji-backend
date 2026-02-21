@@ -25,6 +25,7 @@ def get_ipv4():
         ip = s.getsockname()[0]
     finally:
         s.close()
+    print(f"Detected server IP: {ip}")
     return ip
 
 
@@ -46,10 +47,9 @@ ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
     ".railway.app",
-    # get_ipv4(),
+    get_ipv4(),
     "*"
 ]
-
 
 # Application definition
 INSTALLED_APPS = [
@@ -79,10 +79,9 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
 }
 
-
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
+    # 'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.middleware.security.SecurityMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -177,3 +176,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "api.User"
+
+
+RAZORPAY_KEY = os.getenv("RAZORPAY_KEY")
+RAZORPAY_SECRET = os.getenv("RAZORPAY_SECRET")

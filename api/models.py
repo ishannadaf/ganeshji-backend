@@ -5,7 +5,12 @@ from django.utils import timezone
 class Mandal(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, unique=True)
-
+    colony = models.CharField(max_length=200, blank=True, null=True)
+    area = models.CharField(max_length=200, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    district = models.CharField(max_length=100, blank=True, null=True)
+    state = models.CharField(max_length=100, blank=True, null=True)
+    pincode = models.CharField(max_length=10, blank=True, null=True)
     class Meta:
         db_table = "ganesh_mandals"
 
@@ -185,12 +190,12 @@ class EventMaster(models.Model):
         return self.event_name
 
 class MandalEvent(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    mandal = models.ForeignKey(Mandal, on_delete=models.CASCADE)
     event = models.ForeignKey(EventMaster, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('user', 'event')  # 🚨 Prevent duplicate event creation
+        unique_together = ('mandal', 'event')  # 🚨 Prevent duplicate event creation
         
     
 # ============================

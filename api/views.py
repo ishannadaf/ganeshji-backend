@@ -175,7 +175,7 @@ def dashboard_summary(request):
 @permission_classes([AllowAny])
 def signup(request):
     data = request.data
-
+    print("Received signup data:", data)
     if User.objects.filter(mobile=data.get("mobile")).exists():
         return Response(
             {"error": "Mobile already registered"},
@@ -184,7 +184,13 @@ def signup(request):
 
     # 🔥 Create or get Mandal
     mandal, created = Mandal.objects.get_or_create(
-        name=data["mandal_name"]
+        name=data["mandal_name"],
+        colony=data.get("colony"),
+        area=data.get("area"),
+        city=data.get("city"),
+        district=data.get("district"),
+        state=data.get("state"),
+        pincode=data.get("pincode")
     )
 
     user = User.objects.create_user(
@@ -872,31 +878,53 @@ def get_all_events(request):
     return Response(serializer.data)
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_mandal_event(request):
-    if request.user.role != "Manager":
-        return Response({"error": "Only manager can create event"}, status=403)
-
-    event_id = request.data.get('event_id')
+    event_id = request.data.get("event_id")
 
     if not event_id:
-        return Response({"error": "event_id required"}, status=400)
+        return Response(
+            {"error": "Event ID required"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-    if MandalEvent.objects.filter(user=request.user, event_id=event_id).exists():
-        return Response({"error": "Event already created"}, status=400)
+    # 🔥 Get event master
+    try:
+        event = EventMaster.objects.get(id=event_id)
+    except EventMaster.DoesNotExist:
+        return Response(
+            {"error": "Event not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
 
+    # 🔥 Check duplicate per mandal (NOT per user)
+    if MandalEvent.objects.filter(
+        mandal=request.user.mandal,
+        event=event
+    ).exists():
+        return Response(
+            {"error": "Event already created for this Mandal"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # 🔥 Create event under Mandal
     MandalEvent.objects.create(
-        user=request.user,
-        event_id=event_id
+        mandal=request.user.mandal,
+        event=event
     )
 
-    return Response({"message": "Event created successfully"})
+    return Response(
+        {"message": "Event created successfully"},
+        status=status.HTTP_201_CREATED
+    )
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_my_events(request):
-    events = MandalEvent.objects.filter(user=request.user)
+    events = MandalEvent.objects.filter(
+        mandal=request.user.mandal
+    )
     serializer = MandalEventSerializer(events, many=True)
     return Response(serializer.data)
 

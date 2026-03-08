@@ -76,10 +76,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     entry_count = models.IntegerField(default=0)
 
     # 💰 Wallet
-    wallet_balance = models.FloatField(default=0)
-    total_collected = models.FloatField(default=0)
-    total_transferred = models.FloatField(default=0)
-    manager_balance = models.FloatField(default=0)
+    wallet_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_collected = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_transferred = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    manager_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     # Django auth flags
     is_active = models.BooleanField(default=True)
@@ -115,7 +115,7 @@ class Donation(models.Model):
     )
 
     donor_name = models.CharField(max_length=200)
-    amount = models.FloatField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     whatsapp_number = models.CharField(max_length=20)
     donation_type = models.CharField(max_length=50)
@@ -124,7 +124,7 @@ class Donation(models.Model):
     date = models.DateTimeField()
     remarks = models.TextField(blank=True, null=True)
 
-    created_by_user_id = models.IntegerField()
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE)
     created_by_name = models.CharField(max_length=100)
     mandal = models.ForeignKey(
             Mandal,
@@ -143,6 +143,9 @@ class Donation(models.Model):
     class Meta:
         db_table = "donations"
         ordering = ["-date"]
+        indexes = [
+            models.Index(fields=["mandal_event"]),
+        ]
         
         
 # ============================
@@ -156,12 +159,12 @@ class Expense(models.Model):
     )
 
     category = models.CharField(max_length=100)
-    amount = models.FloatField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     payment_mode = models.CharField(max_length=50)
     paid_to = models.CharField(max_length=100)
 
-    created_by_user_id = models.IntegerField()
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE)
     created_by_name = models.CharField(max_length=100)
     mandal = models.ForeignKey(
             Mandal,
@@ -210,7 +213,7 @@ class WalletTransfer(models.Model):
             on_delete=models.CASCADE,
             related_name="wallet_transfer"
         )
-    amount = models.FloatField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     status = models.CharField(
         max_length=20,
@@ -221,7 +224,7 @@ class WalletTransfer(models.Model):
         ),
         default="Pending",
     )
-
+    client_wallet_transfer_id = models.CharField(max_length=50, unique=True)
     requested_at = models.DateTimeField()
     approved_at = models.DateTimeField(null=True, blank=True)
     mandal_event = models.ForeignKey(

@@ -47,7 +47,7 @@ ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
     ".railway.app",
-    # get_ipv4(),
+    get_ipv4(),
     "*"
 ]
 

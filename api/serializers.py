@@ -34,7 +34,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)
-
+    mandal_name = serializers.CharField(write_only=True)
     colony = serializers.CharField(required=False, allow_blank=True)
     area = serializers.CharField(required=False, allow_blank=True)
     city = serializers.CharField(required=False, allow_blank=True)
@@ -85,12 +85,15 @@ class RegisterSerializer(serializers.ModelSerializer):
 # DONATION (MAPPED)
 # ============================
 class DonationSerializer(serializers.ModelSerializer):
+    created_by_user_id = serializers.IntegerField(
+        source="created_by.id",
+        read_only=True
+    )
     class Meta:
         model = Donation
         exclude = (
             "mandal",
-            "created_by_user_id",
-            "created_by_name",
+            "created_by",
             "is_synced",
             "is_deleted",
         )
@@ -111,8 +114,7 @@ class DonationSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = request.user
 
-        validated_data["created_by_user_id"] = user.id
-        validated_data["created_by_name"] = user.name
+        validated_data["created_by"] = user
         # validated_data["mandal_name"] = user.mandal.name
 
         return super().create(validated_data)
@@ -125,8 +127,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
         model = Expense
         exclude = (
             "mandal",
-            "created_by_user_id",
-            "created_by_name",
+            "created_by",
             "is_synced",
             "is_deleted",
         )
@@ -146,8 +147,8 @@ class ExpenseSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = request.user
 
-        validated_data["created_by_user_id"] = user.id
-        validated_data["created_by_name"] = user.name
+        validated_data["created_by"] = user
+        # validated_data["created_by_name"] = user.name
         # validated_data["mandal_name"] = user.mandal_name
 
         return super().create(validated_data)

@@ -42,6 +42,7 @@ from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 
 @api_view(["POST"])
+@permission_classes([AllowAny])
 def login(request):
     mobile = request.data.get("mobile")
     password = request.data.get("password")
@@ -94,6 +95,7 @@ def calculate_user_wallet(user_id, mandal_event):
 
     sent = WalletTransfer.objects.filter(
         from_user_id=user_id,
+        mandal_event=mandal_event,
         status="Approved"
     ).aggregate(total=Sum("amount"))["total"] or 0
 
@@ -104,6 +106,7 @@ def calculate_manager_wallet(manager_id, mandal_event):
 
     received = WalletTransfer.objects.filter(
         to_manager_id=manager_id,
+        mandal_event=mandal_event,
         status="Approved"
     ).aggregate(total=Sum("amount"))["total"] or 0
 
@@ -121,7 +124,7 @@ def sync_wallet(request):
     try:
         mandal_event = MandalEvent.objects.get(
             id=event_id,
-            user=request.user
+            mandal=request.user.mandal
         )
     except MandalEvent.DoesNotExist:
         return Response({"error": "Invalid event"}, status=403)
@@ -149,7 +152,7 @@ def dashboard_summary(request):
     try:
         mandal_event = MandalEvent.objects.get(
             id=event_id,
-            user=request.user
+            mandal=request.user.mandal
         )
     except MandalEvent.DoesNotExist:
         return Response({"error": "Invalid event"}, status=403)
@@ -231,7 +234,7 @@ def create_donation(request):
     try:
         mandal_event = MandalEvent.objects.get(
             id=mandal_event_id,
-            user=request.user  # ensures event belongs to this manager
+            mandal=request.user.mandal  # ensures event belongs to this manager
         )
     except MandalEvent.DoesNotExist:
         return Response({"error": "Invalid event"}, status=403)
@@ -261,7 +264,7 @@ def get_donations(request):
     try:
         mandal_event = MandalEvent.objects.get(
             id=event_id,
-            user=request.user
+            mandal=request.user.mandal
         )
     except MandalEvent.DoesNotExist:
         return Response({"error": "Invalid event"}, status=403)
@@ -291,14 +294,15 @@ def collection_summary(request):
             status=status.HTTP_403_FORBIDDEN
         )
 
-    mandal = user.mandal_name
+    # mandal = user.mandal_name
 
     donations = (
         Donation.objects
-        .filter(mandal_name=mandal, is_deleted=False)
+        .filter( mandal=user.mandal, is_deleted=False)
         .values("created_by_user_id", "created_by_name")
         .annotate(total=Sum("amount"))
-        .order_by("created_by_name")
+        .order_by("created_by_name"),
+        
     )
 
     return Response(donations)
@@ -317,7 +321,7 @@ def donations_by_user(request, user_id):
 
     qs = Donation.objects.filter(
         created_by_user_id=user_id,
-        mandal_name=user.mandal_name,
+        mandal=user.mandal,
         is_deleted=False
     ).order_by("-date")
 
@@ -337,7 +341,7 @@ def create_expense(request):
     try:
         mandal_event = MandalEvent.objects.get(
             id=mandal_event_id,
-            user=request.user  # ensures event belongs to this manager
+            mandal=request.user.mandal  # ensures event belongs to this manager
         )
     except MandalEvent.DoesNotExist:
         return Response({"error": "Invalid event"}, status=403)
@@ -462,7 +466,7 @@ def create_wallet_request(request):
     WalletTransfer.objects.create(
         client_wallet_transfer_id=client_id,
         from_user_id=user.id,
-        mandal_name=user.mandal_name,
+        mandal=user.mandal,
         amount=amount,
         status="Pending",
         requested_at=timezone.now()
@@ -488,7 +492,7 @@ def get_wallet_requests(request):
         )
 
     qs = WalletTransfer.objects.filter(
-        mandal_name=user.mandal_name,
+        mandal=user.mandal,
         status="Pending"
     ).order_by("requested_at")
 
@@ -545,8 +549,8 @@ def update_profile(request):
             status=403
         )
 
-    user.mandal_name = mandal_name
-    user.save()
+    user.mandal.name = mandal_name
+    user.mandal.save()
 
     return Response({"message": "Profile updated"})
 
@@ -666,7 +670,7 @@ def reject_wallet_request(request):
 @permission_classes([IsAuthenticated])
 def list_users(request):
     users = User.objects.filter(
-        mobile=request.user.mobile
+        mandal=request.user.mandal
     )
 
     return Response(
@@ -747,7 +751,7 @@ def sync_user(request):
             "name": user.name,
             "mobile": user.mobile,
             "role": user.role,
-            "mandal_name": user.mandal_name,
+            "mandal_name": user.mandal.name,
 
             # 🔐 Subscription
             "is_paid": user.is_paid,
@@ -778,7 +782,7 @@ def sync_donations(request):
     try:
         mandal_event = MandalEvent.objects.get(
             id=event_id,
-            user=request.user
+            mandal=request.user.mandal
         )
     except MandalEvent.DoesNotExist:
         return Response({"error": "Invalid event"}, status=403)
@@ -789,6 +793,7 @@ def sync_donations(request):
     )
 
     serializer = DonationSerializer(donations, many=True)
+    print("Sync donations for event_id:", serializer.data)
     return Response(serializer.data)
 
 
@@ -796,14 +801,14 @@ def sync_donations(request):
 @permission_classes([IsAuthenticated])
 def sync_expenses(request):
     event_id = request.GET.get("event_id")
-
+    print("Sync expenses for event_id:", event_id)
     if not event_id:
         return Response({"error": "event_id required"}, status=400)
 
     try:
         mandal_event = MandalEvent.objects.get(
             id=event_id,
-            user=request.user
+            mandal=request.user.mandal
         )
     except MandalEvent.DoesNotExist:
         return Response({"error": "Invalid event"}, status=403)
